@@ -1,0 +1,21 @@
+# Virtual Environment
+myenv/
+venv/
+ENV/
+env/
+
+# Environment Secrets
+.env
+*.env
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE Settings
+.vscode/
+.idea/
+
+# Database files & logs
+*.log
