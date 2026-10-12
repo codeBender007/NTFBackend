@@ -1,0 +1,3 @@
+"""
+CMS database models package.
+"""

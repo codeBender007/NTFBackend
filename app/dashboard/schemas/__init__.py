@@ -1,0 +1,3 @@
+"""
+Dashboard Pydantic schemas package.
+"""

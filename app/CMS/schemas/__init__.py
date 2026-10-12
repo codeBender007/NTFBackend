@@ -1,0 +1,3 @@
+"""
+CMS Pydantic schemas package.
+"""

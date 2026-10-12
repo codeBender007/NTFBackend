@@ -3,11 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from app.api.plantsApi import router as plantsRouter
-from app.api.departmentsApi import router as departmentsRouter
-from app.api.subDepartmentsApi import router as subDepartmentsRouter
-from app.api.linesApi import router as linesRouter
-from app.api.machineApi import router as machineRouter
+from app.LMS.router import router as lms_router
+from app.dashboard.router import router as dashboard_router
+from app.CMS.router import router as cms_router
 
 app = FastAPI(
     title="NTF Automobile LMS/CMS Portal",
@@ -48,9 +46,19 @@ def sqlalchemy_exception_handler(request: Request, exc: SQLAlchemyError):
 def healthCheck():
     return {"status": "online", "message": "NTF Backend API is running successfully"}
 
-# Routers include karein with /api/v1 prefix
-app.include_router(plantsRouter, prefix="/api/v1")
-app.include_router(departmentsRouter, prefix="/api/v1")
-app.include_router(subDepartmentsRouter, prefix="/api/v1")
-app.include_router(linesRouter, prefix="/api/v1")
-app.include_router(machineRouter, prefix="/api/v1")
+app.include_router(
+    lms_router,
+    prefix="/api/lms"
+)
+
+app.include_router(
+    dashboard_router,
+    prefix="/api/dashboard",
+    tags=["Dashboard"]
+)
+
+app.include_router(
+    cms_router,
+    prefix="/api/cms",
+    tags=["CMS"]
+)
