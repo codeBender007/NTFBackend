@@ -1,21 +1,26 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional
 
+# Data create karte waqt (Request Body)
 class LineCreate(BaseModel):
-    departmentId: int
-    subDepartmentId: int
-    lineName: str
+    plantId: Optional[int] = Field(None, gt=0, description="Parent plant ID (optional; auto-inferred from hierarchy if omitted)")
+    departmentId: Optional[int] = Field(None, gt=0, description="Parent department ID (optional; auto-inferred from subDepartment if omitted)")
+    subDepartmentId: int = Field(..., gt=0, description="Parent subDepartment ID")
+    lineName: str = Field(..., min_length=1, max_length=150, description="Line name")
 
+# Data update karte waqt
 class LineUpdate(BaseModel):
-    departmentId: Optional[int] = None
-    subDepartmentId: Optional[int] = None
-    lineName: Optional[str] = None
+    plantId: Optional[int] = Field(None, gt=0, description="Updated plant ID")
+    departmentId: Optional[int] = Field(None, gt=0, description="Updated department ID")
+    subDepartmentId: Optional[int] = Field(None, gt=0, description="Updated subDepartment ID")
+    lineName: Optional[str] = Field(None, min_length=1, max_length=150, description="Updated line name")
 
+# API se response bhejte waqt
 class LineResponse(BaseModel):
     id: int
+    plantId: int
     departmentId: int
     subDepartmentId: int
     lineName: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

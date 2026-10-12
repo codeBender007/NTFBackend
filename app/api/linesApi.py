@@ -4,17 +4,26 @@ from typing import List, Optional
 
 from app.core.database import get_db
 from app.schemas.linesSchema import LineCreate, LineUpdate, LineResponse
-from app.services import linesService
+from app.schemas.machineSchema import MachineResponse
+from app.services import linesService, machineService
 
 router = APIRouter(prefix="/lines", tags=["Lines"])
 
 @router.get("/", response_model=List[LineResponse])
 def getLines(
-    departmentId: Optional[int] = Query(None),
-    subDepartmentId: Optional[int] = Query(None),
+    plantId: Optional[int] = Query(None, description="Filter lines by plant ID"),
+    departmentId: Optional[int] = Query(None, description="Filter lines by department ID"),
+    subDepartmentId: Optional[int] = Query(None, description="Filter lines by sub-department ID"),
+    lineName: Optional[str] = Query(None, description="Filter lines by line name"),
     db: Session = Depends(get_db)
 ):
-    return linesService.getAllLines(db, departmentId=departmentId, subDepartmentId=subDepartmentId)
+    return linesService.getAllLines(
+        db,
+        plantId=plantId,
+        departmentId=departmentId,
+        subDepartmentId=subDepartmentId,
+        lineName=lineName
+    )
 
 @router.get("/{lineId}", response_model=LineResponse)
 def getLine(lineId: int, db: Session = Depends(get_db)):
@@ -40,3 +49,11 @@ def deleteLine(lineId: int, db: Session = Depends(get_db)):
     if not line:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Line not found")
     return {"message": "Line deleted successfully"}
+
+# Cascading lookup: Get all machines for a given line
+@router.get("/{lineId}/machines", response_model=List[MachineResponse], tags=["Lines", "Machines"])
+def getMachinesByLine(lineId: int, db: Session = Depends(get_db)):
+    line = linesService.getLineById(db, lineId)
+    if not line:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Line not found")
+    return machineService.getAllMachines(db, lineId=lineId)

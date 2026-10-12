@@ -4,13 +4,21 @@ from typing import List, Optional
 
 from app.core.database import get_db
 from app.schemas.subDepartmentsSchema import SubDepartmentCreate, SubDepartmentUpdate, SubDepartmentResponse
-from app.services import subDepartmentsService
+from app.schemas.linesSchema import LineResponse
+from app.services import subDepartmentsService, linesService
 
 router = APIRouter(prefix="/sub-departments", tags=["Sub Departments"])
 
 @router.get("/", response_model=List[SubDepartmentResponse])
-def getSubDepartments(departmentId: Optional[int] = Query(None), db: Session = Depends(get_db)):
-    return subDepartmentsService.getAllSubDepartments(db, departmentId=departmentId)
+def getSubDepartments(
+    plantId: Optional[int] = Query(None, description="Filter sub-departments by plant ID"),
+    departmentId: Optional[int] = Query(None, description="Filter sub-departments by department ID"),
+    subDepartmentName: Optional[str] = Query(None, description="Filter sub-departments by name"),
+    db: Session = Depends(get_db)
+):
+    return subDepartmentsService.getAllSubDepartments(
+        db, plantId=plantId, departmentId=departmentId, subDepartmentName=subDepartmentName
+    )
 
 @router.get("/{subDepartmentId}", response_model=SubDepartmentResponse)
 def getSubDepartment(subDepartmentId: int, db: Session = Depends(get_db)):
@@ -36,3 +44,11 @@ def deleteSubDepartment(subDepartmentId: int, db: Session = Depends(get_db)):
     if not subDept:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SubDepartment not found")
     return {"message": "SubDepartment deleted successfully"}
+
+# Cascading lookup: Get all lines for a given sub-department
+@router.get("/{subDepartmentId}/lines", response_model=List[LineResponse], tags=["Sub Departments", "Lines"])
+def getLinesBySubDepartment(subDepartmentId: int, db: Session = Depends(get_db)):
+    subDept = subDepartmentsService.getSubDepartmentById(db, subDepartmentId)
+    if not subDept:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="SubDepartment not found")
+    return linesService.getAllLines(db, subDepartmentId=subDepartmentId)

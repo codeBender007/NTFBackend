@@ -6,18 +6,24 @@ from app.core.database import get_db
 from app.schemas.machineSchema import MachineCreate, MachineUpdate, MachineResponse
 from app.services import machineService
 
-# Ye variable name 'router' hona zaroori hai:
 router = APIRouter(prefix="/machines", tags=["Machines"])
 
 @router.get("/", response_model=List[MachineResponse])
 def getMachines(
-    departmentId: Optional[int] = Query(None),
-    subDepartmentId: Optional[int] = Query(None),
-    lineId: Optional[int] = Query(None),
+    plantId: Optional[int] = Query(None, description="Filter machines by plant ID"),
+    departmentId: Optional[int] = Query(None, description="Filter machines by department ID"),
+    subDepartmentId: Optional[int] = Query(None, description="Filter machines by sub-department ID"),
+    lineId: Optional[int] = Query(None, description="Filter machines by line ID"),
+    machineName: Optional[str] = Query(None, description="Filter machines by machine name"),
     db: Session = Depends(get_db)
 ):
     return machineService.getAllMachines(
-        db, departmentId=departmentId, subDepartmentId=subDepartmentId, lineId=lineId
+        db,
+        plantId=plantId,
+        departmentId=departmentId,
+        subDepartmentId=subDepartmentId,
+        lineId=lineId,
+        machineName=machineName
     )
 
 @router.get("/{machineId}", response_model=MachineResponse)
