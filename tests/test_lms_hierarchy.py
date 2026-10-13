@@ -37,20 +37,20 @@ def run_all_tests():
     paths = schema["paths"]
 
     expected_lms_prefixes = [
-        "/api/lms/plants/",
-        "/api/lms/plants/{plantId}",
-        "/api/lms/plants/{plantId}/departments",
-        "/api/lms/departments/",
-        "/api/lms/departments/{departmentId}",
-        "/api/lms/departments/{departmentId}/sub-departments",
-        "/api/lms/sub-departments/",
-        "/api/lms/sub-departments/{subDepartmentId}",
-        "/api/lms/sub-departments/{subDepartmentId}/lines",
-        "/api/lms/lines/",
-        "/api/lms/lines/{lineId}",
-        "/api/lms/lines/{lineId}/machines",
-        "/api/lms/machines/",
-        "/api/lms/machines/{machineId}",
+        "/api/v1/lms/plants/",
+        "/api/v1/lms/plants/{plantId}",
+        "/api/v1/lms/plants/{plantId}/departments",
+        "/api/v1/lms/departments/",
+        "/api/v1/lms/departments/{departmentId}",
+        "/api/v1/lms/departments/{departmentId}/sub-departments",
+        "/api/v1/lms/sub-departments/",
+        "/api/v1/lms/sub-departments/{subDepartmentId}",
+        "/api/v1/lms/sub-departments/{subDepartmentId}/lines",
+        "/api/v1/lms/lines/",
+        "/api/v1/lms/lines/{lineId}",
+        "/api/v1/lms/lines/{lineId}/machines",
+        "/api/v1/lms/machines/",
+        "/api/v1/lms/machines/{machineId}",
     ]
 
     print("\n[1] Checking OpenAPI Route Registration...")
@@ -58,11 +58,11 @@ def run_all_tests():
         assert ep in paths, f"Missing endpoint in OpenAPI schema: {ep}"
         print(f"  [OK] Found: {ep}")
 
-    # Verify no legacy routes remain
+    # Verify no legacy un-namespaced routes remain
     for p in paths.keys():
-        assert not p.startswith("/api/v1/"), f"Legacy /api/v1 route found: {p}"
-        assert not (p.startswith("/api/") and not (p.startswith("/api/lms") or p.startswith("/api/dashboard") or p.startswith("/api/cms"))), f"Non-modular route found: {p}"
-    print("  [OK] All routes are correctly namespaced under /api/lms!")
+        if p != "/":
+            assert p.startswith("/api/v1/lms") or p.startswith("/api/v1/dashboard") or p.startswith("/api/v1/cms"), f"Non-modular route found: {p}"
+    print("  [OK] All routes are correctly namespaced under /api/v1/lms!")
 
     # 2. Database Model & Relationship Testing
     print("\n[2] Testing Database Models with In-Memory SQLite...")
