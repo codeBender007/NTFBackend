@@ -61,8 +61,14 @@ def run_all_tests():
     # Verify no legacy un-namespaced routes remain
     for p in paths.keys():
         if p != "/":
-            assert p.startswith("/api/v1/lms") or p.startswith("/api/v1/dashboard") or p.startswith("/api/v1/cms"), f"Non-modular route found: {p}"
-    print("  [OK] All routes are correctly namespaced under /api/v1/lms!")
+            assert (
+                p.startswith("/api/v1/lms")
+                or p.startswith("/api/v1/dashboard")
+                or p.startswith("/api/v1/cms")
+                or p.startswith("/api/v1/auth")
+                or p.startswith("/api/auth")
+            ), f"Non-modular route found: {p}"
+    print("  [OK] All routes are correctly namespaced!")
 
     # 2. Database Model & Relationship Testing
     print("\n[2] Testing Database Models with In-Memory SQLite...")

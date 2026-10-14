@@ -1,7 +1,19 @@
 fastapi>=0.110.0
 uvicorn[standard]>=0.28.0
+gunicorn>=21.2.0
 sqlalchemy>=2.0.28
 pyodbc>=5.1.0
 pydantic>=2.6.4
 pydantic-settings>=2.2.1
 python-dotenv>=1.0.1
+
+# Excel Bulk Upload & Processing
+pandas>=2.2.0
+openpyxl>=3.1.2
+python-multipart>=0.0.9
+
+# Validation & Authentication / Password Security
+email-validator>=2.1.0
+passlib[bcrypt]>=1.7.4
+bcrypt>=4.1.2
+PyJWT>=2.8.0

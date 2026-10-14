@@ -1,5 +1,6 @@
 from sqlalchemy import Column, Integer, String, Boolean, Date, DateTime, ForeignKey, Numeric
 from sqlalchemy.sql import func
+from sqlalchemy.orm import synonym
 from app.core.database import Base
 
 
@@ -56,3 +57,7 @@ class User(Base):
     active = Column(Boolean, default=True)
     createdAt = Column(DateTime, server_default=func.getdate())
     updatedAt = Column(DateTime, server_default=func.getdate(), onupdate=func.getdate())
+
+    # Compatibility synonyms for query and attribute access
+    is_active = synonym("active")
+    password_hash = synonym("passwordHash")

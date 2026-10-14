@@ -12,6 +12,12 @@ class Settings(BaseSettings):
     DB_NAME: str = "NTF_DB"
     DB_DRIVER: str = "ODBC Driver 18 for SQL Server"
 
+    # JWT Authentication Configuration
+    SECRET_KEY: str = "ntf-automobile-secret-key-super-secure-change-in-prod-2026"
+    JWT_SECRET_KEY: str = "ntf-automobile-jwt-secret-key-change-in-prod-2026"
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
+
     @property
     def DATABASE_URL(self) -> str:
         # Password aur Driver ko URL encode karein
@@ -26,5 +32,6 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
+        extra = "ignore"
 
 settings = Settings()
