@@ -322,21 +322,32 @@ def updateUser(db: Session, userId: int, updateData: UserUpdate):
     user = getUserById(db, userId)
     if user is None:
         return None
+
     values = _model_dict(updateData, exclude_unset=True)
+
     password = values.pop('password', None)
     values.pop('passwordHash', None)
+
     for field, val in values.items():
         if field in USER_EDIT_COLS:
             setattr(user, field, val)
+
     if password:
         user.passwordHash = get_password_hash(password)
+
     try:
         db.commit()
         db.refresh(user)
+
     except IntegrityError as e:
         db.rollback()
-        raise HTTPException(400, 'Invalid update: duplicate payCode or hierarchy reference') from e
+        raise HTTPException(
+            400,
+            'Invalid update: duplicate payCode or hierarchy reference'
+        ) from e
+
     return user
+
 
 
 def deleteUser(db: Session, userId: int):
