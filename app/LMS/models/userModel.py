@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, Boolean, Date, DateTime, ForeignKey, Numeric
 from sqlalchemy.sql import func
-from sqlalchemy.orm import synonym
+from sqlalchemy.orm import synonym, relationship
 from app.core.database import Base
 
 
@@ -54,9 +54,13 @@ class User(Base):
 
     passwordHash = Column(String(255))
     role = Column(String(50), default="OPERATOR")
+    roleId = Column(Integer, ForeignKey("roles.id"), nullable=True)
     active = Column(Boolean, default=True)
     createdAt = Column(DateTime, server_default=func.getdate())
     updatedAt = Column(DateTime, server_default=func.getdate(), onupdate=func.getdate())
+
+    # Relationship to Role
+    role_obj = relationship("Role", back_populates="users", foreign_keys=[roleId])
 
     # Compatibility synonyms for query and attribute access
     is_active = synonym("active")

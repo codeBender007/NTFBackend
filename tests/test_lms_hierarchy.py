@@ -67,6 +67,7 @@ def run_all_tests():
                 or p.startswith("/api/v1/cms")
                 or p.startswith("/api/v1/auth")
                 or p.startswith("/api/auth")
+                or p.startswith("/api/lms")
             ), f"Non-modular route found: {p}"
     print("  [OK] All routes are correctly namespaced!")
 

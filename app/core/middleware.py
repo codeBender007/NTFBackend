@@ -53,8 +53,11 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         # 2. Extract Authorization header (Bearer <token>)
         auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
         token = None
-        if auth_header and auth_header.strip().startswith("Bearer "):
-            token = auth_header.strip()[7:].strip()
+        if auth_header:
+            clean_header = auth_header.strip()
+            while clean_header.lower().startswith("bearer "):
+                clean_header = clean_header[7:].strip()
+            token = clean_header.strip('"').strip("'").strip()
 
         decoded_token = None
         if token:

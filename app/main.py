@@ -7,7 +7,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.openapi.utils import get_openapi
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from app.LMS.router import router as lms_router
+from app.LMS.router import router as lms_router, rbac_router
 from app.dashboard.router import router as dashboard_router
 from app.CMS.router import router as cms_router
 from app.auth.router import router as auth_router
@@ -121,6 +121,12 @@ def healthCheck():
 app.include_router(
     lms_router,
     prefix="/api/v1/lms"
+)
+
+# Administrative RBAC Routes
+app.include_router(
+    rbac_router,
+    prefix="/api/lms"
 )
 
 app.include_router(

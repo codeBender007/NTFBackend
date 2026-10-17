@@ -51,11 +51,19 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 def decode_access_token(token: str) -> Optional[dict]:
     """
     Decode and verify a signed JWT token.
+    Automatically strips accidental 'Bearer ' prefixes, enclosing quotes, and extra whitespace.
     Returns payload dictionary or None if invalid or expired.
     """
+    if not token or not isinstance(token, str):
+        return None
+
+    clean_token = token.strip().strip('"').strip("'")
+    while clean_token.lower().startswith("bearer "):
+        clean_token = clean_token[7:].strip().strip('"').strip("'")
+
     secret_key = settings.JWT_SECRET_KEY or settings.SECRET_KEY
     try:
-        payload = jwt.decode(token, secret_key, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(clean_token, secret_key, algorithms=[settings.JWT_ALGORITHM])
         return payload
     except jwt.ExpiredSignatureError:
         logger.warning("Access token has expired")

@@ -7,6 +7,11 @@ from app.LMS.services import (
     subDepartmentsService,
     linesService,
     machineService,
+    userService,
+    roleService,
+    pageService,
+    rolePermissionService,
+    userRoleService,
 )
 
 __all__ = [
@@ -15,4 +20,9 @@ __all__ = [
     "subDepartmentsService",
     "linesService",
     "machineService",
+    "userService",
+    "roleService",
+    "pageService",
+    "rolePermissionService",
+    "userRoleService",
 ]

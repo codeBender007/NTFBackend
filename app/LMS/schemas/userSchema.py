@@ -54,6 +54,7 @@ class UserBase(BaseModel):
     aadharNo: Optional[str] = None
 
     role: Optional[str] = "OPERATOR"
+    roleId: Optional[int] = None
     active: Optional[bool] = True
 
 
@@ -112,6 +113,7 @@ class UserUpdate(BaseModel):
     aadharNo: Optional[str] = None
 
     role: Optional[str] = None
+    roleId: Optional[int] = None
     active: Optional[bool] = None
     password: Optional[str] = None
 
