@@ -90,15 +90,15 @@ def test_openapi_routes():
     paths = schema.get("paths", {})
 
     expected_endpoints = [
-        "/api/lms/roles",
-        "/api/lms/roles/{role_id}",
-        "/api/lms/pages",
-        "/api/lms/pages/{page_id}",
-        "/api/lms/roles/{role_id}/permissions",
-        "/api/lms/roles/{role_id}/permissions/{page_id}",
-        "/api/lms/users/{user_id}/role",
-        "/api/lms/users/{user_id}/permissions",
-        "/api/lms/me/permissions",
+        "/api/v1/lms/roles",
+        "/api/v1/lms/roles/{role_id}",
+        "/api/v1/lms/pages",
+        "/api/v1/lms/pages/{page_id}",
+        "/api/v1/lms/roles/{role_id}/permissions",
+        "/api/v1/lms/roles/{role_id}/permissions/{page_id}",
+        "/api/v1/lms/users/{user_id}/role",
+        "/api/v1/lms/users/{user_id}/permissions",
+        "/api/v1/lms/me/permissions",
     ]
 
     for ep in expected_endpoints:

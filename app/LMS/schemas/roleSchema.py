@@ -28,5 +28,6 @@ class RoleResponse(BaseModel):
 
 class RoleDetailResponse(RoleResponse):
     permissions: List[RolePermissionPageResponse] = []
+    pages: List[RolePermissionPageResponse] = []
 
     model_config = ConfigDict(from_attributes=True)

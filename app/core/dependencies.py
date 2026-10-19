@@ -8,7 +8,7 @@ from app.core.database import get_db
 from app.core.security import decode_access_token
 from app.LMS.models.userModel import User
 
-security_scheme = HTTPBearer(auto_error=False)
+security_scheme = HTTPBearer(auto_error=False, scheme_name="BearerAuth")
 
 ADMIN_ROLES = {"SUPER_ADMIN", "SUPERADMIN", "SUPER ADMIN", "ADMIN", "ADMINISTRATOR"}
 VALID_PERMISSION_ACTIONS = {"canView", "canCreate", "canEdit", "canDelete", "canUploadExcel"}
@@ -20,21 +20,38 @@ def get_current_user(
     db: Session = Depends(get_db)
 ) -> User:
     """
-    Extracts and validates the JWT token from request context or Authorization header
-    and retrieves the authenticated active employee.
+    Extracts and validates the JWT token from request context, Authorization header,
+    cookies, or alternative headers and retrieves the authenticated active employee.
     """
     # 1. Check if user payload was already verified and injected by AuthenticationMiddleware
     payload = getattr(request.state, "user", None) or request.scope.get("user")
 
-    # 2. If not already decoded, decode from Authorization header
+    # 2. If not already decoded, decode from credentials, headers, or cookies
     if not payload:
-        if not auth_credentials or not auth_credentials.credentials:
+        raw_token = None
+        if auth_credentials and auth_credentials.credentials:
+            raw_token = auth_credentials.credentials
+        elif request.headers.get("authorization"):
+            raw_token = request.headers.get("authorization")
+        elif request.headers.get("Authorization"):
+            raw_token = request.headers.get("Authorization")
+        elif request.headers.get("x-access-token"):
+            raw_token = request.headers.get("x-access-token")
+        elif request.headers.get("x-auth-token"):
+            raw_token = request.headers.get("x-auth-token")
+        elif request.cookies.get("access_token"):
+            raw_token = request.cookies.get("access_token")
+        elif request.cookies.get("token"):
+            raw_token = request.cookies.get("token")
+
+        if not raw_token:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Access denied. Please log in first.",
                 headers={"WWW-Authenticate": "Bearer"}
             )
-        payload = decode_access_token(auth_credentials.credentials)
+
+        payload = decode_access_token(raw_token)
         if not payload:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -42,15 +59,23 @@ def get_current_user(
                 headers={"WWW-Authenticate": "Bearer"}
             )
 
-    user_id = payload.get("id") or payload.get("sub")
-    if not user_id:
+    raw_user_id = payload.get("id") or payload.get("userId") or payload.get("sub")
+    if not raw_user_id:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token payload: missing user ID",
+            detail="Invalid token payload: missing user identifier",
             headers={"WWW-Authenticate": "Bearer"}
         )
 
-    user = db.query(User).filter(User.id == int(user_id)).first()
+    user = None
+    if isinstance(raw_user_id, int) or (isinstance(raw_user_id, str) and raw_user_id.isdigit()):
+        user = db.query(User).filter(User.id == int(raw_user_id)).first()
+    elif isinstance(raw_user_id, str) and "@" in raw_user_id:
+        user = db.query(User).filter(func.lower(User.email) == raw_user_id.strip().lower()).first()
+
+    if not user and payload.get("email"):
+        user = db.query(User).filter(func.lower(User.email) == payload.get("email").strip().lower()).first()
+
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -76,10 +101,13 @@ def require_role(allowed_roles: Union[str, List[str]]):
     Dependency factory to enforce role-based access control by role name.
     """
     roles = [allowed_roles] if isinstance(allowed_roles, str) else allowed_roles
-    normalized_allowed = {r.upper() for r in roles}
+    normalized_allowed = {r.upper().replace("-", "_").replace(" ", "_").strip() for r in roles}
 
     def role_checker(current_user: User = Depends(get_current_user)) -> User:
-        user_role = (getattr(current_user, "role", "") or "").upper()
+        raw_role = getattr(current_user, "role", None)
+        if not raw_role and getattr(current_user, "role_obj", None):
+            raw_role = current_user.role_obj.name
+        user_role = (raw_role or "").upper().replace("-", "_").replace(" ", "_").strip()
         if user_role not in normalized_allowed:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -94,8 +122,16 @@ def require_admin(current_user: User = Depends(get_current_user)) -> User:
     """
     Enforce administrative authorization for management APIs.
     """
-    user_role = (getattr(current_user, "role", "") or "").upper()
-    if user_role not in ADMIN_ROLES:
+    raw_role = getattr(current_user, "role", None)
+    if not raw_role and getattr(current_user, "role_obj", None):
+        raw_role = current_user.role_obj.name
+    normalized_role = (raw_role or "").upper().replace("-", "_").replace(" ", "_").strip()
+    clean_role_no_sep = normalized_role.replace("_", "")
+
+    if (
+        normalized_role not in ADMIN_ROLES
+        and clean_role_no_sep not in {"SUPERADMIN", "ADMIN", "ADMINISTRATOR"}
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Administrative privileges required to perform this action."

@@ -47,8 +47,10 @@ def get_role_details(db: Session, role_id: int) -> Dict[str, Any]:
     perm_list = []
     for rp, p in perms:
         perm_list.append({
+            "id": p.id,
             "pageId": p.id,
             "module": p.module,
+            "name": p.name,
             "page": p.name,
             "pageKey": p.pageKey,
             "canView": bool(rp.canView),
@@ -62,7 +64,8 @@ def get_role_details(db: Session, role_id: int) -> Dict[str, Any]:
         "id": role.id,
         "name": role.name,
         "isActive": True,
-        "permissions": perm_list
+        "permissions": perm_list,
+        "pages": perm_list
     }
 
 

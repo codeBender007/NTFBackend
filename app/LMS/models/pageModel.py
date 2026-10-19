@@ -10,16 +10,25 @@ class Page(Base):
     id = Column(Integer, primary_key=True, autoincrement=True, index=True)
     module = Column(String(50), nullable=False, index=True)
     name = Column(String(150), nullable=False)
+    _pageKey = Column("pageKey", String(150), nullable=True, index=True)
 
     @property
     def pageKey(self) -> str:
         """
-        Derives canonical pageKey from page name (e.g. 'Users' -> 'users', 'DOJO Hiring' -> 'dojo_hiring').
+        Frontend route identifier / unique slug for access control guards (e.g. 'users', 'dojo_hiring').
         """
+        if self._pageKey and self._pageKey.strip():
+            return self._pageKey.strip()
         if not self.name:
             return ""
-        clean = re.sub(r'[^a-zA-Z0-9]+', '_', self.name.strip().lower()).strip('_')
-        return clean
+        return re.sub(r'[^a-zA-Z0-9]+', '_', self.name.strip().lower()).strip('_')
+
+    @pageKey.setter
+    def pageKey(self, value: Optional[str]):
+        if value and str(value).strip():
+            self._pageKey = re.sub(r'[^a-zA-Z0-9_]+', '_', str(value).strip().lower()).strip('_')
+        else:
+            self._pageKey = None
 
     @property
     def isActive(self) -> bool:

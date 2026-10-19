@@ -11,7 +11,8 @@ from app.LMS.schemas.roleSchema import (
     RoleResponse,
     RoleDetailResponse,
 )
-from app.LMS.services import roleService
+from app.LMS.schemas.rolePermissionSchema import RolePermissionPageResponse
+from app.LMS.services import roleService, rolePermissionService
 
 router = APIRouter(
     prefix="/roles",
@@ -72,6 +73,24 @@ def getRole(
 ):
     """Retrieve detailed role information including assigned pages and permissions."""
     return roleService.get_role_details(db=db, role_id=role_id)
+
+
+@router.get(
+    "/{role_id}/pages",
+    response_model=List[RolePermissionPageResponse],
+    summary="Get assigned pages and permissions for a role (Path parameter)"
+)
+def getRoleAssignedPages(
+    role_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Retrieve all assigned pages and effective permission flags (canView, canCreate, canEdit, canDelete, canUploadExcel)
+    for a given role ID via path parameter /{role_id}/pages.
+    Returns complete page metadata (id, pageId, module, name, pageKey, permissions) for immediate access verification.
+    """
+    return rolePermissionService.get_role_permissions(db=db, role_id=role_id)
 
 
 @router.put(

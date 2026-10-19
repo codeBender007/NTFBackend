@@ -50,14 +50,35 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         method = request.method.upper()
 
-        # 2. Extract Authorization header (Bearer <token>)
+        # 2. Extract Token from Authorization header, custom headers, cookies, or query parameters
+        raw_token = None
         auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
-        token = None
         if auth_header:
-            clean_header = auth_header.strip()
-            while clean_header.lower().startswith("bearer "):
-                clean_header = clean_header[7:].strip()
-            token = clean_header.strip('"').strip("'").strip()
+            raw_token = auth_header
+        elif request.headers.get("x-access-token"):
+            raw_token = request.headers.get("x-access-token")
+        elif request.headers.get("x-auth-token"):
+            raw_token = request.headers.get("x-auth-token")
+        elif request.cookies.get("access_token"):
+            raw_token = request.cookies.get("access_token")
+        elif request.cookies.get("token"):
+            raw_token = request.cookies.get("token")
+        elif request.cookies.get("jwt"):
+            raw_token = request.cookies.get("jwt")
+        elif request.query_params.get("token"):
+            raw_token = request.query_params.get("token")
+        elif request.query_params.get("access_token"):
+            raw_token = request.query_params.get("access_token")
+
+        token = None
+        if raw_token:
+            clean_str = raw_token.strip().strip('"').strip("'")
+            while clean_str.lower().startswith("bearer"):
+                rem = clean_str[6:].strip()
+                if rem.startswith(":"):
+                    rem = rem[1:].strip()
+                clean_str = rem.strip('"').strip("'")
+            token = clean_str
 
         decoded_token = None
         if token:
@@ -73,7 +94,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # 5. Protect Master & Setup Routes (POST, PUT, PATCH, DELETE across all resources)
-        # Includes Plants, Departments, Sub-departments, Lines, Machines, Users/Employees, etc.
+        # Includes Plants, Departments, Sub-departments, Lines, Machines, Users/Employees, Roles, etc.
         if method in PROTECTED_METHODS:
             if not token or not decoded_token:
                 client_ip = request.client.host if request.client else "unknown"

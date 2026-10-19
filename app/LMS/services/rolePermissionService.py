@@ -50,8 +50,10 @@ def get_role_permissions(db: Session, role_id: int) -> List[Dict[str, Any]]:
     result = []
     for rp, p in records:
         result.append({
+            "id": p.id,
             "pageId": p.id,
             "module": p.module,
+            "name": p.name,
             "page": p.name,
             "pageKey": p.pageKey,
             "canView": bool(rp.canView),
@@ -105,8 +107,10 @@ def update_single_page_permission(
     logger.info(f"Updated permissions for role ID {role_id} on page ID {page_id}")
 
     return {
+        "id": page.id,
         "pageId": page.id,
         "module": page.module,
+        "name": page.name,
         "page": page.name,
         "pageKey": page.pageKey,
         "canView": bool(perm_record.canView),

@@ -51,22 +51,36 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 def decode_access_token(token: str) -> Optional[dict]:
     """
     Decode and verify a signed JWT token.
-    Automatically strips accidental 'Bearer ' prefixes, enclosing quotes, and extra whitespace.
+    Automatically strips accidental 'Bearer ', 'Bearer: ', enclosing quotes, and extra whitespace.
     Returns payload dictionary or None if invalid or expired.
     """
     if not token or not isinstance(token, str):
         return None
 
     clean_token = token.strip().strip('"').strip("'")
-    while clean_token.lower().startswith("bearer "):
-        clean_token = clean_token[7:].strip().strip('"').strip("'")
+    while clean_token.lower().startswith("bearer"):
+        remainder = clean_token[6:].strip()
+        if remainder.startswith(":"):
+            remainder = remainder[1:].strip()
+        clean_token = remainder.strip('"').strip("'")
 
-    secret_key = settings.JWT_SECRET_KEY or settings.SECRET_KEY
+    primary_secret = settings.JWT_SECRET_KEY or settings.SECRET_KEY
     try:
-        payload = jwt.decode(clean_token, secret_key, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(clean_token, primary_secret, algorithms=[settings.JWT_ALGORITHM])
         return payload
     except jwt.ExpiredSignatureError:
         logger.warning("Access token has expired")
+        return None
+    except jwt.InvalidSignatureError:
+        # Fallback to alternative secret key if defined and different
+        alt_secret = settings.SECRET_KEY if primary_secret == settings.JWT_SECRET_KEY else settings.JWT_SECRET_KEY
+        if alt_secret and alt_secret != primary_secret:
+            try:
+                payload = jwt.decode(clean_token, alt_secret, algorithms=[settings.JWT_ALGORITHM])
+                return payload
+            except Exception:
+                pass
+        logger.warning("Invalid access token signature")
         return None
     except jwt.InvalidTokenError as e:
         logger.warning(f"Invalid access token: {str(e)}")

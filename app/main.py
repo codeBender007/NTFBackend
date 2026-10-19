@@ -118,15 +118,17 @@ def healthCheck():
 
 
 # 6. Domain Router Mountings
+# Main LMS router includes hierarchy (plants, depts, machines, users) and RBAC routes
 app.include_router(
     lms_router,
     prefix="/api/v1/lms"
 )
 
-# Administrative RBAC Routes
+# Backward-compatibility alias for legacy un-versioned /api/lms routes (hidden from Swagger to prevent duplication)
 app.include_router(
     rbac_router,
-    prefix="/api/lms"
+    prefix="/api/lms",
+    include_in_schema=False
 )
 
 app.include_router(
@@ -168,17 +170,32 @@ def custom_openapi():
     if "components" not in openapi_schema:
         openapi_schema["components"] = {}
 
-    # Define BearerAuth HTTP security scheme
-    openapi_schema["components"]["securitySchemes"] = {
-        "BearerAuth": {
-            "type": "http",
-            "scheme": "bearer",
-            "bearerFormat": "JWT",
-            "description": "Enter your raw JWT token without the 'Bearer ' prefix. Swagger UI automatically prepends 'Bearer '."
-        }
+    bearer_scheme_def = {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "Enter your raw JWT token or 'Bearer <token>'. Authorizing here injects the token into all requests."
     }
 
-    # Apply global security requirement to ensure lock icons appear across Swagger UI
+    # Define single unified BearerAuth HTTP security scheme
+    openapi_schema["components"]["securitySchemes"] = {
+        "BearerAuth": bearer_scheme_def,
+    }
+
+    # Ensure all path operations with security requirements use single BearerAuth
+    paths = openapi_schema.get("paths", {})
+    for path, path_item in paths.items():
+        for method, operation in path_item.items():
+            if method.lower() in {"get", "post", "put", "patch", "delete"} and isinstance(operation, dict):
+                op_sec = operation.get("security")
+                if op_sec is not None:
+                    # Clean out any old HTTPBearer references and ensure only BearerAuth is used
+                    cleaned_sec = [s for s in op_sec if "HTTPBearer" not in s]
+                    if not any("BearerAuth" in s for s in cleaned_sec):
+                        cleaned_sec.append({"BearerAuth": []})
+                    operation["security"] = cleaned_sec
+
+    # Apply global security requirement to ensure single lock icon and dialog field
     openapi_schema["security"] = [{"BearerAuth": []}]
 
     app.openapi_schema = openapi_schema
