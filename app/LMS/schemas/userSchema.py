@@ -120,6 +120,9 @@ class UserUpdate(BaseModel):
 
 class UserResponse(UserBase):
     id: int
+    # Stored legacy/admin records may contain non-RFC email strings (e.g. 'admin');
+    # never fail GET list serialization with 500 ResponseValidationError.
+    email: Optional[str] = None
     createdAt: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -132,5 +135,11 @@ class ExcelUploadResponse(BaseModel):
     skipped: Optional[int] = 0
     errorCount: Optional[int] = 0
     errors: list[str] = []
+    warnings: Optional[list[str]] = []
+    warningCount: Optional[int] = 0
+    durationSeconds: Optional[float] = None
     ignoredExcelColumns: Optional[list[str]] = []
+    hierarchyMatches: Optional[dict[str, int]] = None
     departmentAssignment: Optional[str] = None
+    passwordPolicy: Optional[str] = None
+    payMapping: Optional[str] = None

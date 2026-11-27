@@ -8,8 +8,8 @@ from app.LMS.models.userModel import User
 
 # Super Admin Default Credentials
 SUPER_ADMIN_PAYCODE = "ADMIN-001"
-SUPER_ADMIN_EMAIL = "superadmin@ntfauto.com"
-SUPER_ADMIN_PASSWORD = "SuperAdmin@NTF2026"
+SUPER_ADMIN_EMAIL = "admin"
+SUPER_ADMIN_PASSWORD = "admin123"
 SUPER_ADMIN_ROLE = "SUPER_ADMIN"
 # http://31.97.229.146/ntf/lms/plant
 def create_super_admin():

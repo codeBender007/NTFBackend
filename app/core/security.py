@@ -185,15 +185,19 @@ def verify_employee_password(
         if actual_dob:
             dob_candidates = get_dob_candidates(actual_dob)
             # Check if the stored hash is indeed based on the employee's DOB
+            # or the bulk-import default password ('Welcome@123')
             is_dob_hash = False
             if stored_hash:
-                for candidate in dob_candidates:
-                    if verify_password(candidate, stored_hash):
-                        is_dob_hash = True
-                        break
-                    if stored_hash.strip() == candidate:
-                        is_dob_hash = True
-                        break
+                if verify_password("Welcome@123", stored_hash):
+                    is_dob_hash = True
+                else:
+                    for candidate in dob_candidates:
+                        if verify_password(candidate, stored_hash):
+                            is_dob_hash = True
+                            break
+                        if stored_hash.strip() == candidate:
+                            is_dob_hash = True
+                            break
             else:
                 # If stored hash is None/empty, default DOB is accepted
                 is_dob_hash = True
