@@ -6,6 +6,7 @@ from app.LMS.routes.subDepartmentsApi import router as subDepartmentsRouter
 from app.LMS.routes.linesApi import router as linesRouter
 from app.LMS.routes.machineApi import router as machineRouter
 from app.LMS.routes.usersApi import router as usersRouter
+from app.LMS.routes.questionPaperApi import router as questionPaperRouter
 from app.LMS.routes.roleRoutes import router as roleRouter
 from app.LMS.routes.pageRoutes import router as pageRouter
 from app.LMS.routes.rolePermissionRoutes import router as rolePermissionRouter
@@ -28,6 +29,7 @@ router.include_router(subDepartmentsRouter)
 router.include_router(linesRouter)
 router.include_router(machineRouter)
 router.include_router(usersRouter)
+router.include_router(questionPaperRouter)
 
 # Mount RBAC under LMS router as well
 router.include_router(rbac_router)

@@ -7,6 +7,7 @@ from app.LMS.models.userModel import User
 from app.LMS.models.roleModel import Role
 from app.LMS.models.pageModel import Page
 from app.LMS.models.rolePermissionModel import RolePermission
+from app.LMS.models.questionPaperModel import QuestionPaper, QuestionPaperSubmission
 
 __all__ = [
     "Plant",
@@ -18,4 +19,6 @@ __all__ = [
     "Role",
     "Page",
     "RolePermission",
+    "QuestionPaper",
+    "QuestionPaperSubmission",
 ]
