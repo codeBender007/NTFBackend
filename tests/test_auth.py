@@ -21,6 +21,7 @@ from app.main import app
 from app.core.database import Base
 from app.core.security import get_password_hash, decode_access_token
 from app.LMS.models.userModel import User
+from app.LMS.models.roleModel import Role
 from app.auth.schemas.authSchema import LoginRequest, LogoutResponse
 from app.auth.routes.authApi import login, logout
 from app.auth.services import authService
@@ -91,7 +92,58 @@ def setup_database():
             active=True
         )
 
-        db.add_all([admin_user, bulk_employee, inactive_employee, custom_pwd_employee])
+        # 5. Two Operators sharing the SAME empName, logging in with empName + payCode
+        op_dup_1 = User(
+            payCode="14246",
+            empName="AJAY KUMAR",
+            dob=date(1994, 4, 1),
+            email="AJAY KUMAR",
+            passwordHash=get_password_hash("14246"),
+            departmentName="LB",
+            lineName="LBLine",
+            machineName="LBMachine",
+            designation="OPERATOR",
+            role="OPERATOR",
+            active=True,
+        )
+        op_dup_2 = User(
+            payCode="14247",
+            empName="AJAY KUMAR",
+            dob=date(1996, 6, 15),
+            email="AJAY KUMAR_14247",
+            passwordHash=get_password_hash("14247"),
+            departmentName="PAINT SHOP",
+            lineName="PAINTSHOPLine",
+            machineName="PAINTSHOPMachine",
+            designation="OPERATOR",
+            role="OPERATOR",
+            active=True,
+        )
+
+        # 6. Supervisor resolved via Role table (roleId -> Role.name='Supervisor')
+        sup_role = Role(id=77, name="Supervisor")
+        db.merge(sup_role)
+        db.flush()
+        role_table_supervisor = User(
+            payCode="SUP-7701",
+            empName="Vikram Singh",
+            dob=date(1989, 3, 12),
+            email="vikram.sup",
+            passwordHash=get_password_hash("SupPass@123"),
+            role="OPERATOR",  # legacy string overridden by authoritative Role table
+            roleId=77,
+            active=True,
+        )
+
+        db.add_all([
+            admin_user,
+            bulk_employee,
+            inactive_employee,
+            custom_pwd_employee,
+            op_dup_1,
+            op_dup_2,
+            role_table_supervisor,
+        ])
         db.commit()
     finally:
         db.close()
@@ -244,7 +296,32 @@ def run_auth_tests():
         resp_custom = login(LoginRequest(email="sunita@ntfauto.com", password="CustomP@ssw0rd!"), db)
         assert resp_custom.user.payCode == "EMP-2002"
         assert resp_custom.user.role == "SUPERVISOR"
-        print("  [OK] Custom password user successfully authenticated.")
+        assert resp_custom.user.isSupervisor is True
+        assert resp_custom.user.isAdmin is False
+        assert resp_custom.user.isEmployee is False
+        print("  [OK] Custom password user successfully authenticated as Supervisor.")
+
+        # 8. Role-Aware Login: Operator empName + payCode (including duplicate names) & Role table resolution
+        print("\n[8] Testing Role-Aware Login (Operator empName+payCode, duplicate names, Role table)...")
+        resp_op1 = login(LoginRequest(username="AJAY KUMAR", password="14246"), db)
+        assert resp_op1.user.payCode == "14246"
+        assert resp_op1.user.isEmployee is True
+        assert resp_op1.user.roleType == "OPERATOR"
+        assert resp_op1.user.departmentName == "LB"
+        assert resp_op1.user.userId == resp_op1.user.id
+
+        resp_op2 = login(LoginRequest(username="AJAY KUMAR", password="14247"), db)
+        assert resp_op2.user.payCode == "14247"
+        assert resp_op2.user.isEmployee is True
+        assert resp_op2.user.departmentName == "PAINT SHOP"
+        print("  [OK] Duplicate-name operators authenticated accurately via empName + payCode.")
+
+        resp_role_sup = login(LoginRequest(email="vikram.sup", password="SupPass@123"), db)
+        assert resp_role_sup.user.roleId == 77
+        assert resp_role_sup.user.roleName == "Supervisor"
+        assert resp_role_sup.user.roleType == "SUPERVISOR"
+        assert resp_role_sup.user.isSupervisor is True
+        print("  [OK] Authoritative Role table resolution verified for Supervisor.")
 
         # 9. Test Logout Endpoint (POST /api/auth/logout)
         print("\n[9] Testing Logout Endpoint (POST /api/auth/logout)...")

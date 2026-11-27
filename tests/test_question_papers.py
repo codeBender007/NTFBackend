@@ -20,16 +20,21 @@ from app.LMS.models import (
     Machine,
     Plant,
     QuestionPaper,
+    QuestionPaperAssignment,
     QuestionPaperSubmission,
     SubDepartment,
     User,
 )
 from app.LMS.schemas.questionPaperSchema import (
+    OperatorUpcomingPaperResponse,
+    QuestionPaperAssignmentBulkResponse,
+    QuestionPaperAssignmentCreate,
     QuestionPaperCreate,
     QuestionPaperResponse,
     QuestionPaperSubmissionCreate,
     QuestionPaperSubmissionResponse,
     QuestionPaperUpdate,
+    SubmissionGradeUpdate,
 )
 from app.LMS.services import questionPaperService
 from app.main import app
@@ -45,12 +50,17 @@ def _setup_db():
         )
 
     # Verify idempotent table creation (call twice)
-    target_tables = [QuestionPaper.__table__, QuestionPaperSubmission.__table__]
+    target_tables = [
+        QuestionPaper.__table__,
+        QuestionPaperSubmission.__table__,
+        QuestionPaperAssignment.__table__,
+    ]
     Base.metadata.create_all(engine)
     Base.metadata.create_all(engine, tables=target_tables, checkfirst=True)
     insp = inspect(engine)
     assert "question_papers" in insp.get_table_names()
     assert "question_paper_submissions" in insp.get_table_names()
+    assert "question_paper_assignments" in insp.get_table_names()
 
     Session = sessionmaker(bind=engine)
     db = Session()
@@ -103,8 +113,13 @@ def run_question_paper_tests():
     expected_paths = [
         "/api/v1/lms/question-papers/",
         "/api/v1/lms/question-papers/{paper_id}",
+        "/api/v1/lms/question-papers/assignments",
+        "/api/v1/lms/question-papers/assignments/{assignment_id}",
+        "/api/v1/lms/question-papers/operator/upcoming",
+        "/api/v1/lms/question-papers/operator/past",
         "/api/v1/lms/question-papers/submissions",
         "/api/v1/lms/question-papers/submissions/{submission_id}",
+        "/api/v1/lms/question-papers/submissions/{submission_id}/grade",
         "/api/v1/lms/question-papers/{paper_id}/submit",
     ]
     for ep in expected_paths:
@@ -223,7 +238,33 @@ def run_question_paper_tests():
     assert single is not None and single["title"] == "DOJO TEST PAPER- DAY-1"
     print("[OK] Question paper list filtering and GET by ID verified.")
 
-    # 6. Submit Day 1 filled response (no answer keys -> SUBMITTED)
+    # 6. Supervisor assigns ONLY Day 1 paper to operator -> Operator upcoming returns ONLY Day 1
+    before_assign_upcoming = questionPaperService.get_operator_upcoming_papers(db, operator_id=emp.id)
+    assert before_assign_upcoming == [], "Operator must see 0 upcoming papers before manual assignment"
+
+    asgn_res = questionPaperService.assign_question_papers(
+        db=db,
+        payload=QuestionPaperAssignmentCreate(
+            question_paper_id=resp_day1.id,
+            operator_ids=[emp.id],
+            notes="Complete Day 1 safety induction",
+        ),
+        current_user=admin,
+    )
+    asgn_bulk = QuestionPaperAssignmentBulkResponse(**asgn_res)
+    assert asgn_bulk.assigned_count == 1
+    assert len(asgn_bulk.assignments) == 1
+    assert asgn_bulk.assignments[0].status == "ASSIGNED"
+
+    upcoming_after_assign = questionPaperService.get_operator_upcoming_papers(db, operator_id=emp.id)
+    assert len(upcoming_after_assign) == 1
+    upcoming_item = OperatorUpcomingPaperResponse(**upcoming_after_assign[0])
+    assert upcoming_item.question_paper.id == resp_day1.id
+    assert upcoming_item.status == "ASSIGNED"
+    assert upcoming_item.notes == "Complete Day 1 safety induction"
+    print("[OK] Supervisor assignment & Operator Upcoming isolation verified.")
+
+    # 7. Submit Day 1 filled response (no answer keys -> SUBMITTED + auto-completes assignment)
     sub1 = questionPaperService.submit_question_paper(
         db=db,
         payload=QuestionPaperSubmissionCreate(
@@ -247,11 +288,59 @@ def run_question_paper_tests():
     assert sub1_resp.answered_count == 3
     assert sub1_resp.total_questions == 3
     assert sub1_resp.status == "SUBMITTED"
+    assert sub1_resp.is_graded is False
+    assert sub1_resp.evaluation_status == "Pending Review"
+    assert sub1_resp.assignment_id == asgn_bulk.assignments[0].id
     assert sub1_resp.answers["3"] == "मशीन की देखभाल"
     assert sub1_resp.department_id == 6 and sub1_resp.machine_id == 1008
-    print("[OK] Day 1 submission saved with user_id, answers, participant_info, and schedule.")
 
-    # 7. Submit Day 2 filled response (with answer keys -> auto-scored PASSED 100%)
+    # Upcoming must now be empty and Past must contain Day 1 submission
+    upcoming_after_submit = questionPaperService.get_operator_upcoming_papers(db, operator_id=emp.id)
+    assert upcoming_after_submit == [], "Submitted paper must move out of Upcoming immediately"
+    past_after_submit = questionPaperService.get_operator_past_papers(db, operator_id=emp.id)
+    assert len(past_after_submit) == 1 and past_after_submit[0]["id"] == sub1_resp.id
+    completed_assignments = questionPaperService.list_assignments(
+        db, operator_id=emp.id, status_filter="COMPLETED"
+    )
+    assert len(completed_assignments) == 1
+    assert completed_assignments[0]["submission_id"] == sub1_resp.id
+    print("[OK] Day 1 submission auto-completed assignment and moved paper from Upcoming to Past.")
+
+    # 8. Supervisor grades Day 1 submission -> Operator Past reflects score/remarks/Graded
+    graded = questionPaperService.grade_submission(
+        db=db,
+        submission_id=sub1_resp.id,
+        payload=SubmissionGradeUpdate(
+            question_marks={"1": 1, "2": 1, "3": 0.5},
+            max_score=3,
+            remarks="Good understanding of plant safety",
+        ),
+        current_user=admin,
+    )
+    graded_resp = QuestionPaperSubmissionResponse(**graded)
+    assert graded_resp.is_graded is True
+    assert graded_resp.evaluation_status == "Graded"
+    assert float(graded_resp.score) == 2.5
+    assert float(graded_resp.max_score) == 3.0
+    assert float(graded_resp.percentage) == 83.33
+    assert graded_resp.passed is True
+    assert graded_resp.status == "PASSED"
+    assert graded_resp.remarks == "Good understanding of plant safety"
+    assert graded_resp.graded_by == admin.id
+
+    past_after_grade = questionPaperService.get_operator_past_papers(db, operator_id=emp.id)
+    assert past_after_grade[0]["is_graded"] is True
+    assert past_after_grade[0]["evaluation_status"] == "Graded"
+    assert past_after_grade[0]["remarks"] == "Good understanding of plant safety"
+
+    # Supervisor submission filters: is_graded & search
+    graded_only = questionPaperService.list_submissions(db, is_graded=True, search="Vishnu")
+    assert len(graded_only) == 1 and graded_only[0]["id"] == sub1_resp.id
+    pending_only = questionPaperService.list_submissions(db, status_filter="PENDING")
+    assert len(pending_only) == 0
+    print("[OK] Supervisor grading & filtered submission listing verified.")
+
+    # 9. Submit Day 2 filled response (with answer keys -> auto-scored PASSED 100%)
     sub2 = questionPaperService.submit_question_paper(
         db=db,
         payload=QuestionPaperSubmissionCreate(

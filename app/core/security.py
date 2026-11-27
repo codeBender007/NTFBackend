@@ -156,19 +156,25 @@ def get_dob_candidates(dob: date) -> List[str]:
 def verify_employee_password(
     plain_password: str,
     stored_hash: Optional[str],
-    employee_dob: Optional[Union[date, datetime, str]] = None
+    employee_dob: Optional[Union[date, datetime, str]] = None,
+    employee_paycode: Optional[str] = None,
 ) -> bool:
     """
     Verify the submitted password against the stored password hash.
-    Also handles default password logic for employees imported via bulk Excel,
-    where default passwords are set to the employee's Date of Birth (DOB).
-    Handles format parsing/matching properly (e.g. 'YYYY-MM-DD', 'DD-MM-YYYY', 'DDMMYYYY', 'DD/MM/YYYY').
+    Supports:
+    - Direct bcrypt verification (covers custom passwords and payCode bcrypt hashes)
+    - Default payCode fallback when passwordHash is unset/legacy default
+    - Legacy default DOB password formats (YYYY-MM-DD, DD-MM-YYYY, DDMMYYYY, DD/MM/YYYY)
     """
     if not plain_password:
         return False
 
-    # 1. Direct bcrypt verification (covers users with custom passwords or exact match)
+    # 1. Direct bcrypt verification (covers custom passwords, payCode hashes, and exact DOB hashes)
     if stored_hash and verify_password(plain_password, stored_hash):
+        return True
+
+    # 1b. If stored_hash is missing/empty (uninitialized) and payCode matches directly
+    if not stored_hash and employee_paycode and plain_password.strip() == str(employee_paycode).strip():
         return True
 
     # 2. Check if the submitted password is an alternative representation of a DOB
@@ -185,7 +191,7 @@ def verify_employee_password(
         if actual_dob:
             dob_candidates = get_dob_candidates(actual_dob)
             # Check if the stored hash is indeed based on the employee's DOB
-            # or the bulk-import default password ('Welcome@123')
+            # or the legacy bulk-import default password ('Welcome@123')
             is_dob_hash = False
             if stored_hash:
                 if verify_password("Welcome@123", stored_hash):

@@ -1,9 +1,11 @@
 import json
 import re
-from decimal import Decimal, ROUND_HALF_UP
+from datetime import datetime
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException, status
+from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
@@ -11,13 +13,19 @@ from app.LMS.models.departmentsModel import Department
 from app.LMS.models.linesModel import Line
 from app.LMS.models.machineModel import Machine
 from app.LMS.models.plantsModel import Plant
-from app.LMS.models.questionPaperModel import QuestionPaper, QuestionPaperSubmission
+from app.LMS.models.questionPaperModel import (
+    QuestionPaper,
+    QuestionPaperAssignment,
+    QuestionPaperSubmission,
+)
 from app.LMS.models.subDepartmentsModel import SubDepartment
 from app.LMS.models.userModel import User
 from app.LMS.schemas.questionPaperSchema import (
+    QuestionPaperAssignmentCreate,
     QuestionPaperCreate,
     QuestionPaperSubmissionCreate,
     QuestionPaperUpdate,
+    SubmissionGradeUpdate,
 )
 
 
@@ -282,7 +290,10 @@ def _serialize_paper(paper: QuestionPaper) -> Dict[str, Any]:
     }
 
 
-def _serialize_submission(sub: QuestionPaperSubmission) -> Dict[str, Any]:
+def _serialize_submission(
+    sub: QuestionPaperSubmission,
+    assignment: Optional[QuestionPaperAssignment] = None,
+) -> Dict[str, Any]:
     return {
         "id": sub.id,
         "question_paper_id": sub.question_paper_id,
@@ -313,8 +324,110 @@ def _serialize_submission(sub: QuestionPaperSubmission) -> Dict[str, Any]:
         "passed": sub.passed,
         "status": sub.status,
         "remarks": sub.remarks,
+        "question_marks": _from_json(sub.question_marks_json, {}),
+        "is_graded": bool(sub.is_graded),
+        "evaluation_status": sub.evaluation_status or ("Graded" if sub.is_graded else "Pending Review"),
+        "graded_by": sub.graded_by,
+        "graded_by_name": sub.graded_by_name or (sub.grader.empName if sub.grader else None),
+        "graded_at": sub.graded_at,
+        "assignment_id": assignment.id if assignment else None,
+        "assigned_at": assignment.assigned_at if assignment else None,
+        "assigned_by_name": (
+            assignment.assigned_by_name or (assignment.assigner.empName if assignment.assigner else None)
+            if assignment
+            else None
+        ),
         "submitted_at": sub.submitted_at,
         "updated_at": sub.updated_at,
+    }
+
+
+def _serialize_assignment(asgn: QuestionPaperAssignment) -> Dict[str, Any]:
+    paper = asgn.question_paper
+    op = asgn.operator
+    assigner = asgn.assigner
+
+    plant_id = paper.plant_id if (paper and paper.plant_id is not None) else (op.plantId if op else None)
+    plant_name = (
+        paper.plant.plantName
+        if (paper and paper.plant)
+        else (op.plantLocation if op else None)
+    )
+    department_id = (
+        paper.department_id
+        if (paper and paper.department_id is not None)
+        else (op.departmentId if op else None)
+    )
+    department_name = (
+        paper.department.departmentName
+        if (paper and paper.department)
+        else (op.departmentName if op else None)
+    )
+    sub_department_id = (
+        paper.sub_department_id
+        if (paper and paper.sub_department_id is not None)
+        else (op.subDepartmentId if op else None)
+    )
+    sub_department_name = (
+        paper.sub_department.subDepartmentName
+        if (paper and paper.sub_department)
+        else (op.subDepartmentName if op else None)
+    )
+    line_id = paper.line_id if (paper and paper.line_id is not None) else (op.lineId if op else None)
+    line_name = (
+        paper.line.lineName
+        if (paper and paper.line)
+        else (op.lineName if op else None)
+    )
+    machine_id = (
+        paper.machine_id
+        if (paper and paper.machine_id is not None)
+        else (op.machineId if op else None)
+    )
+    machine_name = (
+        paper.machine.machineName
+        if (paper and paper.machine)
+        else (op.machineName if op else None)
+    )
+
+    return {
+        "id": asgn.id,
+        "question_paper_id": asgn.question_paper_id,
+        "question_paper_title": paper.title if paper else None,
+        "question_paper_description": paper.description if paper else None,
+        "day_type": asgn.day_type,
+        "total_marks": paper.total_marks if paper else None,
+        "total_questions": paper.total_questions if paper else 0,
+        "duration_minutes": paper.duration_minutes if paper else None,
+        "pass_percentage": paper.pass_percentage if paper else None,
+        "operator_id": asgn.operator_id,
+        "operator_name": op.empName if op else None,
+        "operator_pay_code": op.payCode if op else None,
+        "operator_email": op.email if op else None,
+        "operator_designation": op.designation if op else None,
+        "operator_department_name": op.departmentName if op else None,
+        "operator_line_name": op.lineName if op else None,
+        "operator_machine_name": op.machineName if op else None,
+        "plant_id": plant_id,
+        "plant_name": plant_name,
+        "department_id": department_id,
+        "department_name": department_name,
+        "sub_department_id": sub_department_id,
+        "sub_department_name": sub_department_name,
+        "line_id": line_id,
+        "line_name": line_name,
+        "machine_id": machine_id,
+        "machine_name": machine_name,
+        "assigned_by": asgn.assigned_by,
+        "assigned_by_name": asgn.assigned_by_name or (assigner.empName if assigner else None),
+        "status": asgn.status,
+        "submission_id": asgn.submission_id,
+        "assigned_at": asgn.assigned_at,
+        "due_at": asgn.due_at,
+        "completed_at": asgn.completed_at,
+        "notes": asgn.notes,
+        "metadata": _from_json(asgn.metadata_json, None),
+        "is_active": bool(asgn.is_active),
     }
 
 
@@ -333,11 +446,25 @@ def _submission_query_with_relations(db: Session):
     return db.query(QuestionPaperSubmission).options(
         joinedload(QuestionPaperSubmission.question_paper),
         joinedload(QuestionPaperSubmission.user),
+        joinedload(QuestionPaperSubmission.grader),
         joinedload(QuestionPaperSubmission.plant),
         joinedload(QuestionPaperSubmission.department),
         joinedload(QuestionPaperSubmission.sub_department),
         joinedload(QuestionPaperSubmission.line),
         joinedload(QuestionPaperSubmission.machine),
+    )
+
+
+def _assignment_query_with_relations(db: Session):
+    return db.query(QuestionPaperAssignment).options(
+        joinedload(QuestionPaperAssignment.question_paper).joinedload(QuestionPaper.plant),
+        joinedload(QuestionPaperAssignment.question_paper).joinedload(QuestionPaper.department),
+        joinedload(QuestionPaperAssignment.question_paper).joinedload(QuestionPaper.sub_department),
+        joinedload(QuestionPaperAssignment.question_paper).joinedload(QuestionPaper.line),
+        joinedload(QuestionPaperAssignment.question_paper).joinedload(QuestionPaper.machine),
+        joinedload(QuestionPaperAssignment.question_paper).joinedload(QuestionPaper.creator),
+        joinedload(QuestionPaperAssignment.operator),
+        joinedload(QuestionPaperAssignment.assigner),
     )
 
 
@@ -725,6 +852,25 @@ def submit_question_paper(
 
     try:
         db.add(submission)
+        db.flush()
+
+        # Atomically mark any active pending manual assignments for this operator + paper as COMPLETED
+        pending_assignments = (
+            db.query(QuestionPaperAssignment)
+            .filter(
+                QuestionPaperAssignment.question_paper_id == paper.id,
+                QuestionPaperAssignment.operator_id == submitting_user.id,
+                QuestionPaperAssignment.is_active == True,  # noqa: E712
+                QuestionPaperAssignment.status.in_(["ASSIGNED", "PENDING"]),
+            )
+            .all()
+        )
+        now_utc = datetime.utcnow()
+        for pending_asgn in pending_assignments:
+            pending_asgn.status = "COMPLETED"
+            pending_asgn.submission_id = submission.id
+            pending_asgn.completed_at = now_utc
+
         db.commit()
     except IntegrityError as exc:
         db.rollback()
@@ -738,7 +884,34 @@ def submit_question_paper(
         .filter(QuestionPaperSubmission.id == submission.id)
         .first()
     )
-    return _serialize_submission(loaded)
+    linked_assignment = (
+        db.query(QuestionPaperAssignment)
+        .options(joinedload(QuestionPaperAssignment.assigner))
+        .filter(QuestionPaperAssignment.submission_id == submission.id)
+        .order_by(QuestionPaperAssignment.id.desc())
+        .first()
+    )
+    return _serialize_submission(loaded, linked_assignment)
+
+
+def _load_assignments_by_submission_ids(
+    db: Session,
+    submission_ids: List[int],
+) -> Dict[int, QuestionPaperAssignment]:
+    if not submission_ids:
+        return {}
+    rows = (
+        db.query(QuestionPaperAssignment)
+        .options(joinedload(QuestionPaperAssignment.assigner))
+        .filter(QuestionPaperAssignment.submission_id.in_(submission_ids))
+        .order_by(QuestionPaperAssignment.id.desc())
+        .all()
+    )
+    mapping: Dict[int, QuestionPaperAssignment] = {}
+    for row in rows:
+        if row.submission_id is not None and row.submission_id not in mapping:
+            mapping[row.submission_id] = row
+    return mapping
 
 
 def list_submissions(
@@ -751,6 +924,9 @@ def list_submissions(
     sub_department_id: Optional[int] = None,
     line_id: Optional[int] = None,
     machine_id: Optional[int] = None,
+    status_filter: Optional[str] = None,
+    is_graded: Optional[bool] = None,
+    search: Optional[str] = None,
     skip: int = 0,
     limit: int = 100,
 ) -> List[Dict[str, Any]]:
@@ -772,6 +948,29 @@ def list_submissions(
         query = query.filter(QuestionPaperSubmission.line_id == line_id)
     if machine_id is not None:
         query = query.filter(QuestionPaperSubmission.machine_id == machine_id)
+    if is_graded is not None:
+        query = query.filter(QuestionPaperSubmission.is_graded == is_graded)
+    if status_filter is not None and status_filter.strip():
+        st_norm = re.sub(r"[\s\-]+", "_", status_filter.strip()).upper()
+        if st_norm in {"PENDING", "PENDING_REVIEW", "UNGRADED"}:
+            query = query.filter(QuestionPaperSubmission.is_graded == False)  # noqa: E712
+        elif st_norm == "GRADED":
+            query = query.filter(QuestionPaperSubmission.is_graded == True)  # noqa: E712
+        else:
+            query = query.filter(QuestionPaperSubmission.status == st_norm)
+    if search is not None and search.strip():
+        pattern = f"%{search.strip()}%"
+        query = (
+            query.join(User, QuestionPaperSubmission.user_id == User.id)
+            .join(QuestionPaper, QuestionPaperSubmission.question_paper_id == QuestionPaper.id)
+            .filter(
+                or_(
+                    User.empName.ilike(pattern),
+                    User.payCode.ilike(pattern),
+                    QuestionPaper.title.ilike(pattern),
+                )
+            )
+        )
 
     submissions = (
         query.order_by(QuestionPaperSubmission.submitted_at.desc(), QuestionPaperSubmission.id.desc())
@@ -779,7 +978,8 @@ def list_submissions(
         .limit(min(max(limit, 1), 1000))
         .all()
     )
-    return [_serialize_submission(s) for s in submissions]
+    assignments_map = _load_assignments_by_submission_ids(db, [s.id for s in submissions])
+    return [_serialize_submission(s, assignments_map.get(s.id)) for s in submissions]
 
 
 def get_submission_by_id(db: Session, submission_id: int) -> Optional[Dict[str, Any]]:
@@ -790,4 +990,499 @@ def get_submission_by_id(db: Session, submission_id: int) -> Optional[Dict[str, 
     )
     if not sub:
         return None
-    return _serialize_submission(sub)
+    linked_assignment = (
+        db.query(QuestionPaperAssignment)
+        .options(joinedload(QuestionPaperAssignment.assigner))
+        .filter(QuestionPaperAssignment.submission_id == sub.id)
+        .order_by(QuestionPaperAssignment.id.desc())
+        .first()
+    )
+    return _serialize_submission(sub, linked_assignment)
+
+
+def grade_submission(
+    db: Session,
+    submission_id: int,
+    payload: SubmissionGradeUpdate,
+    current_user: Optional[User] = None,
+) -> Optional[Dict[str, Any]]:
+    """Save supervisor manual grading/evaluation marks, percentage, pass/fail, and remarks."""
+    sub = (
+        _submission_query_with_relations(db)
+        .filter(QuestionPaperSubmission.id == submission_id)
+        .first()
+    )
+    if not sub:
+        return None
+
+    paper = sub.question_paper
+
+    if payload.question_marks is not None:
+        sub.question_marks_json = _to_json(payload.question_marks)
+
+    # Resolve score: explicit score > sum of numeric question_marks > existing score
+    score: Optional[Decimal] = sub.score
+    if payload.score is not None:
+        score = Decimal(str(payload.score))
+    elif payload.question_marks:
+        total_earned = Decimal("0")
+        has_numeric = False
+        for mark_val in payload.question_marks.values():
+            if mark_val is None or (isinstance(mark_val, str) and not mark_val.strip()):
+                continue
+            try:
+                total_earned += Decimal(str(mark_val))
+                has_numeric = True
+            except (InvalidOperation, ValueError, TypeError):
+                continue
+        if has_numeric:
+            score = total_earned
+
+    max_score: Optional[Decimal] = sub.max_score
+    if payload.max_score is not None:
+        max_score = Decimal(str(payload.max_score))
+    elif max_score is None and paper and paper.total_marks is not None:
+        max_score = Decimal(str(paper.total_marks))
+
+    if score is not None:
+        score = score.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if max_score is not None:
+        max_score = max_score.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    if payload.percentage is not None:
+        percentage = Decimal(str(payload.percentage)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    elif score is not None and max_score is not None and max_score > 0:
+        percentage = ((score / max_score) * Decimal("100")).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+    else:
+        percentage = sub.percentage
+
+    if payload.passed is not None:
+        passed = bool(payload.passed)
+    elif percentage is not None:
+        pass_threshold = Decimal(
+            str(paper.pass_percentage if (paper and paper.pass_percentage is not None) else 80)
+        )
+        passed = percentage >= pass_threshold
+    else:
+        passed = sub.passed
+
+    grader_id = payload.graded_by if payload.graded_by is not None else (
+        current_user.id if current_user else sub.graded_by
+    )
+    grader_user = None
+    if payload.graded_by is not None:
+        grader_user = db.query(User).filter(User.id == payload.graded_by).first()
+        if not grader_user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Grader user with id {payload.graded_by} does not exist",
+            )
+
+    grader_name = (
+        payload.graded_by_name.strip()
+        if (payload.graded_by_name and payload.graded_by_name.strip())
+        else (
+            grader_user.empName
+            if grader_user
+            else (current_user.empName if current_user else sub.graded_by_name)
+        )
+    )
+
+    sub.score = score
+    sub.max_score = max_score
+    sub.percentage = percentage
+    sub.passed = passed
+    sub.is_graded = True
+    sub.evaluation_status = "Graded"
+    if payload.status and payload.status.strip():
+        sub.status = payload.status.strip().upper()
+    elif passed is True:
+        sub.status = "PASSED"
+    elif passed is False:
+        sub.status = "FAILED"
+    else:
+        sub.status = "GRADED"
+
+    if payload.remarks is not None:
+        sub.remarks = payload.remarks.strip() or None
+
+    sub.graded_by = grader_id
+    sub.graded_by_name = grader_name
+    sub.graded_at = datetime.utcnow()
+
+    db.commit()
+
+    loaded = (
+        _submission_query_with_relations(db)
+        .filter(QuestionPaperSubmission.id == sub.id)
+        .first()
+    )
+    linked_assignment = (
+        db.query(QuestionPaperAssignment)
+        .options(joinedload(QuestionPaperAssignment.assigner))
+        .filter(QuestionPaperAssignment.submission_id == sub.id)
+        .order_by(QuestionPaperAssignment.id.desc())
+        .first()
+    )
+    return _serialize_submission(loaded, linked_assignment)
+
+
+def assign_question_papers(
+    db: Session,
+    payload: QuestionPaperAssignmentCreate,
+    current_user: Optional[User] = None,
+) -> Dict[str, Any]:
+    """Supervisor bulk/single assignment of question paper(s) to selected operator(s)."""
+    paper_ids: List[int] = []
+    if payload.question_paper_id is not None:
+        paper_ids.append(payload.question_paper_id)
+    if payload.question_paper_ids:
+        for pid in payload.question_paper_ids:
+            if pid not in paper_ids:
+                paper_ids.append(pid)
+
+    operator_ids: List[int] = []
+    if payload.operator_id is not None:
+        operator_ids.append(payload.operator_id)
+    if payload.operator_ids:
+        for oid in payload.operator_ids:
+            if oid not in operator_ids:
+                operator_ids.append(oid)
+
+    if not paper_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one question_paper_id is required",
+        )
+    if not operator_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least one operator_id is required",
+        )
+
+    papers = db.query(QuestionPaper).filter(QuestionPaper.id.in_(paper_ids)).all()
+    papers_by_id = {p.id: p for p in papers}
+    missing_papers = [pid for pid in paper_ids if pid not in papers_by_id]
+    if missing_papers:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Question paper(s) not found: {missing_papers}",
+        )
+    inactive_papers = [pid for pid in paper_ids if not papers_by_id[pid].is_active]
+    if inactive_papers:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot assign inactive question paper(s): {inactive_papers}",
+        )
+
+    operators = db.query(User).filter(User.id.in_(operator_ids)).all()
+    operators_by_id = {u.id: u for u in operators}
+    missing_operators = [oid for oid in operator_ids if oid not in operators_by_id]
+    if missing_operators:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Operator user(s) not found: {missing_operators}",
+        )
+
+    assigned_by_id = (
+        payload.assigned_by
+        if payload.assigned_by is not None
+        else (current_user.id if current_user else None)
+    )
+    assigner_user = None
+    if payload.assigned_by is not None:
+        assigner_user = db.query(User).filter(User.id == payload.assigned_by).first()
+        if not assigner_user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Assigning user with id {payload.assigned_by} does not exist",
+            )
+
+    assigned_by_name = (
+        payload.assigned_by_name.strip()
+        if (payload.assigned_by_name and payload.assigned_by_name.strip())
+        else (
+            assigner_user.empName
+            if assigner_user
+            else (current_user.empName if current_user else None)
+        )
+    )
+
+    existing_rows = (
+        db.query(QuestionPaperAssignment)
+        .filter(
+            QuestionPaperAssignment.question_paper_id.in_(paper_ids),
+            QuestionPaperAssignment.operator_id.in_(operator_ids),
+        )
+        .order_by(QuestionPaperAssignment.id.desc())
+        .all()
+    )
+    active_pending_map: Dict[Tuple[int, int], QuestionPaperAssignment] = {}
+    inactive_unsubmitted_map: Dict[Tuple[int, int], QuestionPaperAssignment] = {}
+    for row in existing_rows:
+        key = (row.question_paper_id, row.operator_id)
+        if row.is_active and row.status in ("ASSIGNED", "PENDING") and key not in active_pending_map:
+            active_pending_map[key] = row
+        elif (not row.is_active) and row.submission_id is None and key not in inactive_unsubmitted_map:
+            inactive_unsubmitted_map[key] = row
+
+    now_utc = datetime.utcnow()
+    notes_clean = payload.notes.strip() if (payload.notes and payload.notes.strip()) else None
+    metadata_str = _to_json(payload.metadata)
+
+    assigned_count = 0
+    reactivated_count = 0
+    updated_count = 0
+    touched: List[QuestionPaperAssignment] = []
+
+    try:
+        for pid in paper_ids:
+            paper = papers_by_id[pid]
+            for oid in operator_ids:
+                key = (pid, oid)
+                if key in active_pending_map:
+                    asgn = active_pending_map[key]
+                    asgn.assigned_by = assigned_by_id
+                    asgn.assigned_by_name = assigned_by_name
+                    asgn.assigned_at = now_utc
+                    if payload.due_at is not None:
+                        asgn.due_at = payload.due_at
+                    if payload.notes is not None:
+                        asgn.notes = notes_clean
+                    if payload.metadata is not None:
+                        asgn.metadata_json = metadata_str
+                    updated_count += 1
+                    touched.append(asgn)
+                elif key in inactive_unsubmitted_map:
+                    asgn = inactive_unsubmitted_map[key]
+                    asgn.is_active = True
+                    asgn.status = "ASSIGNED"
+                    asgn.day_type = paper.day_type
+                    asgn.assigned_by = assigned_by_id
+                    asgn.assigned_by_name = assigned_by_name
+                    asgn.assigned_at = now_utc
+                    asgn.due_at = payload.due_at
+                    asgn.completed_at = None
+                    asgn.submission_id = None
+                    asgn.notes = notes_clean
+                    asgn.metadata_json = metadata_str
+                    reactivated_count += 1
+                    touched.append(asgn)
+                else:
+                    asgn = QuestionPaperAssignment(
+                        question_paper_id=pid,
+                        operator_id=oid,
+                        assigned_by=assigned_by_id,
+                        assigned_by_name=assigned_by_name,
+                        day_type=paper.day_type,
+                        status="ASSIGNED",
+                        assigned_at=now_utc,
+                        due_at=payload.due_at,
+                        notes=notes_clean,
+                        metadata_json=metadata_str,
+                        is_active=True,
+                    )
+                    db.add(asgn)
+                    assigned_count += 1
+                    touched.append(asgn)
+
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Failed to save question paper assignments due to invalid reference",
+        ) from exc
+
+    touched_ids = [a.id for a in touched]
+    loaded_rows = (
+        _assignment_query_with_relations(db)
+        .filter(QuestionPaperAssignment.id.in_(touched_ids))
+        .all()
+    )
+    loaded_by_id = {a.id: a for a in loaded_rows}
+    ordered_serialized = [_serialize_assignment(loaded_by_id[aid]) for aid in touched_ids if aid in loaded_by_id]
+
+    return {
+        "assigned_count": assigned_count,
+        "reactivated_count": reactivated_count,
+        "updated_count": updated_count,
+        "assignments": ordered_serialized,
+    }
+
+
+def list_assignments(
+    db: Session,
+    question_paper_id: Optional[int] = None,
+    operator_id: Optional[int] = None,
+    assigned_by: Optional[int] = None,
+    status_filter: Optional[str] = None,
+    day_type: Optional[str] = None,
+    plant_id: Optional[int] = None,
+    department_id: Optional[int] = None,
+    sub_department_id: Optional[int] = None,
+    line_id: Optional[int] = None,
+    machine_id: Optional[int] = None,
+    is_active: Optional[bool] = True,
+    skip: int = 0,
+    limit: int = 200,
+) -> List[Dict[str, Any]]:
+    query = _assignment_query_with_relations(db)
+
+    if question_paper_id is not None:
+        query = query.filter(QuestionPaperAssignment.question_paper_id == question_paper_id)
+    if operator_id is not None:
+        query = query.filter(QuestionPaperAssignment.operator_id == operator_id)
+    if assigned_by is not None:
+        query = query.filter(QuestionPaperAssignment.assigned_by == assigned_by)
+    if status_filter is not None and status_filter.strip():
+        st_norm = re.sub(r"[\s\-]+", "_", status_filter.strip()).upper()
+        if st_norm in {"PENDING", "ASSIGNED"}:
+            query = query.filter(QuestionPaperAssignment.status.in_(["ASSIGNED", "PENDING"]))
+        else:
+            query = query.filter(QuestionPaperAssignment.status == st_norm)
+    if day_type is not None and day_type.strip():
+        query = query.filter(QuestionPaperAssignment.day_type == normalize_day_type(day_type))
+    if is_active is not None:
+        query = query.filter(QuestionPaperAssignment.is_active == is_active)
+
+    if any(x is not None for x in (plant_id, department_id, sub_department_id, line_id, machine_id)):
+        query = query.join(
+            QuestionPaper, QuestionPaperAssignment.question_paper_id == QuestionPaper.id
+        ).join(User, QuestionPaperAssignment.operator_id == User.id)
+        if plant_id is not None:
+            query = query.filter(
+                or_(QuestionPaper.plant_id == plant_id, User.plantId == plant_id)
+            )
+        if department_id is not None:
+            query = query.filter(
+                or_(QuestionPaper.department_id == department_id, User.departmentId == department_id)
+            )
+        if sub_department_id is not None:
+            query = query.filter(
+                or_(
+                    QuestionPaper.sub_department_id == sub_department_id,
+                    User.subDepartmentId == sub_department_id,
+                )
+            )
+        if line_id is not None:
+            query = query.filter(
+                or_(QuestionPaper.line_id == line_id, User.lineId == line_id)
+            )
+        if machine_id is not None:
+            query = query.filter(
+                or_(QuestionPaper.machine_id == machine_id, User.machineId == machine_id)
+            )
+
+    rows = (
+        query.order_by(QuestionPaperAssignment.assigned_at.desc(), QuestionPaperAssignment.id.desc())
+        .offset(max(skip, 0))
+        .limit(min(max(limit, 1), 1000))
+        .all()
+    )
+    return [_serialize_assignment(a) for a in rows]
+
+
+def unassign_question_paper(db: Session, assignment_id: int) -> bool:
+    asgn = (
+        db.query(QuestionPaperAssignment)
+        .filter(QuestionPaperAssignment.id == assignment_id)
+        .first()
+    )
+    if not asgn:
+        return False
+    asgn.is_active = False
+    db.commit()
+    return True
+
+
+def get_operator_upcoming_papers(
+    db: Session,
+    operator_id: int,
+    day_type: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 100,
+) -> List[Dict[str, Any]]:
+    """
+    Return ONLY active question papers manually assigned to this operator
+    that they have NOT yet attempted/submitted.
+    """
+    query = (
+        _assignment_query_with_relations(db)
+        .join(QuestionPaper, QuestionPaperAssignment.question_paper_id == QuestionPaper.id)
+        .filter(
+            QuestionPaperAssignment.operator_id == operator_id,
+            QuestionPaperAssignment.is_active == True,  # noqa: E712
+            QuestionPaperAssignment.status.in_(["ASSIGNED", "PENDING"]),
+            QuestionPaper.is_active == True,  # noqa: E712
+        )
+    )
+    if day_type is not None and day_type.strip():
+        query = query.filter(QuestionPaperAssignment.day_type == normalize_day_type(day_type))
+
+    assignments = (
+        query.order_by(QuestionPaperAssignment.assigned_at.desc(), QuestionPaperAssignment.id.desc())
+        .all()
+    )
+    if not assignments:
+        return []
+
+    # Exclude any paper already submitted by this operator
+    submitted_paper_ids = {
+        row[0]
+        for row in db.query(QuestionPaperSubmission.question_paper_id)
+        .filter(QuestionPaperSubmission.user_id == operator_id)
+        .distinct()
+        .all()
+    }
+
+    seen_paper_ids = set()
+    upcoming: List[Dict[str, Any]] = []
+    for asgn in assignments:
+        if asgn.question_paper is None:
+            continue
+        if asgn.question_paper_id in submitted_paper_ids:
+            continue
+        if asgn.question_paper_id in seen_paper_ids:
+            continue
+        seen_paper_ids.add(asgn.question_paper_id)
+        upcoming.append(
+            {
+                "assignment_id": asgn.id,
+                "status": asgn.status,
+                "assigned_by": asgn.assigned_by,
+                "assigned_by_name": asgn.assigned_by_name
+                or (asgn.assigner.empName if asgn.assigner else None),
+                "assigned_at": asgn.assigned_at,
+                "due_at": asgn.due_at,
+                "notes": asgn.notes,
+                "metadata": _from_json(asgn.metadata_json, None),
+                "question_paper": _serialize_paper(asgn.question_paper),
+            }
+        )
+
+    start = max(skip, 0)
+    end = start + min(max(limit, 1), 1000)
+    return upcoming[start:end]
+
+
+def get_operator_past_papers(
+    db: Session,
+    operator_id: int,
+    day_type: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 100,
+) -> List[Dict[str, Any]]:
+    """
+    Return ONLY question papers already attempted/submitted by this operator,
+    including submitted answers, submission timestamp, and supervisor grading/remarks.
+    """
+    return list_submissions(
+        db=db,
+        user_id=operator_id,
+        day_type=day_type,
+        skip=skip,
+        limit=limit,
+    )
