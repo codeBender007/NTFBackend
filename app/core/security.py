@@ -20,10 +20,10 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         return False
 
 
-def get_password_hash(password: str) -> str:
+def get_password_hash(password: str, rounds: int = 12) -> str:
     """Plain password ko hash karne ke liye (Max 72 bytes safe truncate)"""
     pwd_bytes = (password or "Welcome@123").encode("utf-8")[:72]
-    salt = bcrypt.gensalt()
+    salt = bcrypt.gensalt(rounds=rounds)
     return bcrypt.hashpw(pwd_bytes, salt).decode("utf-8")
 
 

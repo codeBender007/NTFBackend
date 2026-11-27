@@ -115,7 +115,7 @@ NAME_TYPO_ALIASES = {
 }
 
 USER_COLS = set(User.__table__.columns.keys())
-DEFAULT_IMPORT_PASSWORD = 'Welcome@123'
+BULK_BCRYPT_ROUNDS = 4  # Fast per-row bcrypt (~1ms/row) so 1,000+ unique payCode hashes finish in ~1-2s.
 RESET_EXISTING_PASSWORDS_ON_UPLOAD = False  # Existing passwords must NOT change during re-upload.
 logger = logging.getLogger(__name__)
 BATCH_SIZE = 500
@@ -595,6 +595,41 @@ class _HierarchyLookup:
         return resolved, warnings
 
 
+def _allocate_unique_username(
+    preferred: str,
+    pay_code: str,
+    used_usernames: Dict[str, str],
+    max_len: int = 150,
+) -> str:
+    """Return a trimmed, case-insensitively unique username/login identifier for this payCode."""
+    base = re.sub(r'\s+', ' ', preferred).strip()[:max_len]
+    if not base:
+        base = pay_code[:max_len]
+
+    owner = used_usernames.get(base.lower())
+    if owner is None or owner == pay_code:
+        used_usernames[base.lower()] = pay_code
+        return base
+
+    # Disambiguate duplicate employee names cleanly using their unique payCode
+    suffix = f'_{pay_code}'
+    candidate = f'{base[: max(1, max_len - len(suffix))]}{suffix}'
+    owner = used_usernames.get(candidate.lower())
+    if owner is None or owner == pay_code:
+        used_usernames[candidate.lower()] = pay_code
+        return candidate
+
+    counter = 2
+    while True:
+        extra = f'_{pay_code}_{counter}'
+        candidate = f'{base[: max(1, max_len - len(extra))]}{extra}'
+        owner = used_usernames.get(candidate.lower())
+        if owner is None or owner == pay_code:
+            used_usernames[candidate.lower()] = pay_code
+            return candidate
+        counter += 1
+
+
 def _row_data(row: dict, hierarchy: _HierarchyLookup, present_cols: Set[str]) -> Tuple[dict, List[str]]:
     paycode = _string(row.get('Paycode'))
     if not paycode:
@@ -897,34 +932,72 @@ async def processExcelUpload(db: Session, file: UploadFile):
                 'hierarchyMatches': match_counts,
             }
 
-        # Fetch ONLY id/payCode rather than loading every user + all columns.
-        # SQL Server limits SQL IN parameters; split lookups into chunks.
-        existing = {}
+        # Fetch existing user metadata (id, email, passwordHash) in batched chunks,
+        # plus all currently occupied login usernames/emails for duplicate-safe assignment.
+        existing: Dict[str, Tuple[int, Optional[str], Optional[str]]] = {}
         codes = [data['payCode'] for _, data in rows]
         for start_idx in range(0, len(codes), BATCH_SIZE):
             part = codes[start_idx:start_idx + BATCH_SIZE]
-            existing.update(
-                db.query(User.payCode, User.id).filter(User.payCode.in_(part)).all()
-            )
+            for pay_code_db, user_id_db, email_db, pwd_db in (
+                db.query(User.payCode, User.id, User.email, User.passwordHash)
+                .filter(User.payCode.in_(part))
+                .all()
+            ):
+                existing[pay_code_db] = (user_id_db, email_db, pwd_db)
 
-        # Hash default password ONCE outside the row loop (avoids hundreds of slow bcrypt calls).
-        has_new_users = any(data['payCode'] not in existing for _, data in rows)
-        default_password_hash = get_password_hash(DEFAULT_IMPORT_PASSWORD) if has_new_users else None
+        used_usernames: Dict[str, str] = {}
+        for pay_code_db, email_db in (
+            db.query(User.payCode, User.email)
+            .filter(User.email.isnot(None))
+            .all()
+        ):
+            cleaned_email = _string(email_db)
+            if cleaned_email:
+                used_usernames.setdefault(cleaned_email.lower(), pay_code_db)
+
+        email_max_len = getattr(User.__table__.columns['email'].type, 'length', None) or 150
+        username_max_len = (
+            getattr(User.__table__.columns['username'].type, 'length', None) or 150
+            if 'username' in USER_COLS else email_max_len
+        )
 
         inserts, updates = [], []
         for idx, data in rows:
             code = data['payCode']
+            emp_name = data['empName']
+
             if code in existing:
-                # Keep passwords, roles, roleId, IDs, createdAt unchanged on Excel update.
-                # Explicitly ensure active=True so previously soft-deleted/inactive records
-                # reappear in active listings after re-import.
-                updated_row = {'id': existing[code], **data, 'active': True}
+                user_id_db, existing_email_db, existing_pwd_db = existing[code]
+                cleaned_existing = _string(existing_email_db)
+                if cleaned_existing and not cleaned_existing.lower().startswith('abc@gmail.com'):
+                    preferred_login = cleaned_existing
+                else:
+                    preferred_login = emp_name
+                resolved_login = _allocate_unique_username(
+                    preferred_login, code, used_usernames, max_len=email_max_len
+                )
+                row_payload = {**data, 'email': resolved_login}
+                if 'username' in USER_COLS:
+                    row_payload['username'] = resolved_login[:username_max_len]
+
+                # Keep existing non-empty passwords, roles, roleId, createdAt unchanged on update;
+                # if an existing row has no passwordHash yet, initialize it to payCode.
+                updated_row = {'id': user_id_db, **row_payload, 'active': True}
+                if not existing_pwd_db:
+                    updated_row['passwordHash'] = get_password_hash(code, rounds=BULK_BCRYPT_ROUNDS)
                 updates.append(updated_row)
                 saved_row = updated_row
             else:
+                resolved_login = _allocate_unique_username(
+                    emp_name, code, used_usernames, max_len=email_max_len
+                )
+                row_payload = {**data, 'email': resolved_login}
+                if 'username' in USER_COLS:
+                    row_payload['username'] = resolved_login[:username_max_len]
+
                 saved_row = {
-                    **data,
-                    'passwordHash': default_password_hash,
+                    **row_payload,
+                    'passwordHash': get_password_hash(code, rounds=BULK_BCRYPT_ROUNDS),
                     'role': 'OPERATOR',
                     'active': True if data.get('active') is None else data.get('active'),
                 }
@@ -981,7 +1054,7 @@ async def processExcelUpload(db: Session, file: UploadFile):
         'departmentAssignment': (
             'departmentId, subDepartmentId, lineId, machineId, and plantId matched against database records'
         ),
-        'passwordPolicy': 'New users default hashed once (Welcome@123 / DOB login); existing passwords preserved',
+        'passwordPolicy': 'New users default username=empName (deduplicated) and password=payCode; existing passwords preserved',
         'payMapping': 'Basic to salary, HRA to hra',
     }
     
